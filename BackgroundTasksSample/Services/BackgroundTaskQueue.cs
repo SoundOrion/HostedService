@@ -27,7 +27,7 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         // in case too many publishers/calls start accumulating.
         var options = new BoundedChannelOptions(capacity)
         {
-            FullMode = BoundedChannelFullMode.Wait
+            FullMode = BoundedChannelFullMode.Wait // キューが満杯なら待機
         };
         _queue = Channel.CreateBounded<Func<CancellationToken, ValueTask>>(options);
     }
@@ -49,6 +49,11 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         var workItem = await _queue.Reader.ReadAsync(cancellationToken);
 
         return workItem;
+    }
+
+    public void Dispose()
+    {
+        _queue.Writer.Complete(); // キューのクローズ
     }
 }
 #endregion
