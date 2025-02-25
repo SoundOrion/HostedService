@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -40,6 +41,7 @@ public class MonitorLoop
             {
                 // Enqueue a background work item
                 await _taskQueue.QueueBackgroundWorkItemAsync(BuildWorkItem);
+                //await _taskQueue.QueueBackgroundWorkItemAsync(OpenNotepad);
             }
         }
     }
@@ -80,5 +82,21 @@ public class MonitorLoop
             _logger.LogInformation("Queued Background Task {Guid} was cancelled.", guid);
         }
     }
+
+    private async ValueTask OpenNotepad(CancellationToken token)
+    {
+        try
+        {
+            _logger.LogInformation("Opening Notepad...");
+            Process.Start("notepad.exe");
+            await Task.Delay(1000, token); // è≠Çµë“ã@
+            _logger.LogInformation("Notepad opened.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open Notepad.");
+        }
+    }
+}
 }
 #endregion
