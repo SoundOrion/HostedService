@@ -51,9 +51,10 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         return workItem;
     }
 
-    public void Dispose()
+    public Task StopAsync()
     {
-        _queue.Writer.Complete(); // キューのクローズ
+        _queue.Writer.Complete();
+        return Task.CompletedTask;
     }
 }
 #endregion
