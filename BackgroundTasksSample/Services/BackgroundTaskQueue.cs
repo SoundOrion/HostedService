@@ -58,11 +58,49 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
     }
 }
 
-public class BackgroundTaskQueueSimple : IBackgroundTaskQueue
+public class BackgroundTaskQueueSimple : IBackgroundTaskQueue, IDisposable
+{
+    private readonly ConcurrentQueue<Func<CancellationToken, ValueTask>> _queue;
+    private readonly SemaphoreSlim _signal;
+
+    public BackgroundTaskQueueSimple(int capacity)
+    {
+        _queue = new ConcurrentQueue<Func<CancellationToken, ValueTask>>();
+        _signal = new SemaphoreSlim(0);
+    }
+
+    public ValueTask QueueBackgroundWorkItemAsync(Func<CancellationToken, ValueTask> workItem)
+    {
+        if (workItem == null) throw new ArgumentNullException(nameof(workItem));
+
+        _queue.Enqueue(workItem);
+        _signal.Release(); // 待機しているスレッドを解放
+        return ValueTask.CompletedTask;
+    }
+
+    public async ValueTask<Func<CancellationToken, ValueTask>> DequeueAsync(CancellationToken cancellationToken)
+    {
+        await _signal.WaitAsync(cancellationToken); // キューにデータが入るまで待機
+
+        if (_queue.TryDequeue(out var workItem))
+        {
+            return workItem;
+        }
+
+        throw new InvalidOperationException("Failed to dequeue an item.");
+    }
+
+    public void Dispose()
+    {
+        _signal.Dispose();
+    }
+}
+
+public class BackgroundTaskQueueSimple2 : IBackgroundTaskQueue
 {
     private readonly BlockingCollection<Func<CancellationToken, ValueTask>> _queue;
 
-    public BackgroundTaskQueueSimple(int capacity)
+    public BackgroundTaskQueueSimple2(int capacity)
     {
         // キューの最大容量を設定
         _queue = new BlockingCollection<Func<CancellationToken, ValueTask>>(
@@ -95,7 +133,7 @@ public class BackgroundTaskQueueSimple : IBackgroundTaskQueue
         }
         catch (OperationCanceledException)
         {
-            //return new ValueTask<Func<CancellationToken, ValueTask>>(() => new ValueTask());
+            return new ValueTask<Func<CancellationToken, ValueTask>>();
         }
     }
 
