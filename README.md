@@ -156,3 +156,5 @@ dotnet run
 ✅ `Scoped Service` を使った依存関係管理  
 ✅ `CancellationToken` を用いたキャンセル処理  
 
+This software uses Disruptor (https://github.com/LMAX-Exchange/disruptor),
+licensed under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).

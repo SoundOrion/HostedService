@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Disruptor.Dsl;
+using Disruptor;
+using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Channels;
@@ -164,5 +166,66 @@ public class BlockingCollectionTaskQueue : IBackgroundTaskQueue
     {
         _queue.CompleteAdding(); // キューの追加を終了
         _queue.Dispose();
+    }
+}
+
+/// <summary>
+/// **🚀 `Disruptor` を使用した超高速バックグラウンドタスクキュー**
+/// </summary>
+public class DisruptorTaskQueue : IBackgroundTaskQueue, IDisposable
+{
+    private readonly Disruptor<TaskEvent> _disruptor;
+    private readonly RingBuffer<TaskEvent> _ringBuffer;
+
+    public DisruptorTaskQueue(int bufferSize = 1024)
+    {
+        _disruptor = new Disruptor<TaskEvent>(() => new TaskEvent(), bufferSize, TaskScheduler.Default);
+
+        _disruptor.HandleEventsWith(new DisruptorEventHandler());
+        _ringBuffer = _disruptor.Start();
+    }
+
+    public ValueTask QueueBackgroundWorkItemAsync(Func<CancellationToken, ValueTask> workItem)
+    {
+        if (workItem == null) throw new ArgumentNullException(nameof(workItem));
+
+        long sequence = _ringBuffer.Next();
+        try
+        {
+            var eventRef = _ringBuffer[sequence];  // **読み取り専用なのでインスタンスを取得**
+            eventRef.WorkItem = workItem;          // **フィールドを変更**
+        }
+        finally
+        {
+            _ringBuffer.Publish(sequence);
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<Func<CancellationToken, ValueTask>> DequeueAsync(CancellationToken cancellationToken)
+    {
+        throw new NotSupportedException("Disruptor processes tasks internally via event handlers.");
+    }
+
+    public void Dispose()
+    {
+        _disruptor.Shutdown();
+    }
+
+    private class DisruptorEventHandler : IEventHandler<TaskEvent>
+    {
+        public void OnEvent(TaskEvent data, long sequence, bool endOfBatch)
+        {
+            data.WorkItem?.Invoke(CancellationToken.None).GetAwaiter().GetResult();
+        }
+    }
+
+    /// <summary>
+    /// **Disruptor に格納するタスクデータオブジェクト**
+    /// </summary>
+    public class TaskEvent
+    {
+        public Func<CancellationToken, ValueTask> WorkItem { get; set; } = _ => new ValueTask();
     }
 }
