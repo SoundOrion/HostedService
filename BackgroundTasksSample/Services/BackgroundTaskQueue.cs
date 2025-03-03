@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Channels;
@@ -6,6 +6,9 @@ using System.Threading.Tasks;
 
 namespace BackgroundTasksSample.Services;
 
+/// <summary>
+/// バックグラウンドタスクキューのインターフェース
+/// </summary>
 public interface IBackgroundTaskQueue
 {
     ValueTask QueueBackgroundWorkItemAsync(Func<CancellationToken, ValueTask> workItem);
@@ -14,11 +17,17 @@ public interface IBackgroundTaskQueue
         CancellationToken cancellationToken);
 }
 
-public class BackgroundTaskQueue : IBackgroundTaskQueue
+/// <summary>
+/// **🚀 推奨！** `Channel<T>` を使用したバックグラウンドタスクキュー
+/// - `BoundedChannel` によりバックプレッシャー制御が可能
+/// - `UnboundedChannel` にすれば無制限キューも OK
+/// - `async/await` に完全対応
+/// </summary>
+public class ChannelBasedTaskQueue : IBackgroundTaskQueue
 {
     private readonly Channel<Func<CancellationToken, ValueTask>> _queue;
 
-    public BackgroundTaskQueue(int capacity)
+    public ChannelBasedTaskQueue(int capacity)
     {
         // Capacity should be set based on the expected application load and
         // number of concurrent threads accessing the queue.
@@ -27,11 +36,11 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         // in case too many publishers/calls start accumulating.
         var options = new BoundedChannelOptions(capacity)
         {
-            FullMode = BoundedChannelFullMode.Wait // �L���[�����t�Ȃ�ҋ@
+            FullMode = BoundedChannelFullMode.Wait // キューが満杯なら待機
         };
         _queue = Channel.CreateBounded<Func<CancellationToken, ValueTask>>(options);
 
-        //// �������̃L���[���쐬
+        //// 無制限のキューを作成
         //_queue = Channel.CreateUnbounded<Func<CancellationToken, ValueTask>>();
     }
 
@@ -61,12 +70,17 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
     }
 }
 
-public class BackgroundTaskQueueSimple : IBackgroundTaskQueue, IDisposable
+/// <summary>
+/// `ConcurrentQueue<T>` + `SemaphoreSlim` を使用したバックグラウンドタスクキュー
+/// - 非同期 (`async/await`) に対応
+/// - **キューのサイズ制限はできない**
+/// </summary>
+public class ConcurrentQueueTaskQueue : IBackgroundTaskQueue, IDisposable
 {
     private readonly ConcurrentQueue<Func<CancellationToken, ValueTask>> _queue;
     private readonly SemaphoreSlim _signal;
 
-    public BackgroundTaskQueueSimple(int capacity)
+    public ConcurrentQueueTaskQueue()
     {
         _queue = new ConcurrentQueue<Func<CancellationToken, ValueTask>>();
         _signal = new SemaphoreSlim(0);
@@ -77,13 +91,13 @@ public class BackgroundTaskQueueSimple : IBackgroundTaskQueue, IDisposable
         if (workItem == null) throw new ArgumentNullException(nameof(workItem));
 
         _queue.Enqueue(workItem);
-        _signal.Release(); // �ҋ@���Ă���X���b�h�����
+        _signal.Release(); // 待機しているスレッドを解放
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask<Func<CancellationToken, ValueTask>> DequeueAsync(CancellationToken cancellationToken)
     {
-        await _signal.WaitAsync(cancellationToken); // �L���[�Ƀf�[�^������܂őҋ@
+        await _signal.WaitAsync(cancellationToken); // キューにデータが入るまで待機
 
         if (_queue.TryDequeue(out var workItem))
         {
@@ -99,13 +113,19 @@ public class BackgroundTaskQueueSimple : IBackgroundTaskQueue, IDisposable
     }
 }
 
-public class BackgroundTaskQueueSimple2 : IBackgroundTaskQueue
+/// <summary>
+/// `BlockingCollection<T>` を使用したバックグラウンドタスクキュー
+/// - **同期処理用**
+/// - **`async/await` 非対応** (`Take()` はブロッキング)
+/// - **キューのサイズ制限が可能**
+/// </summary>
+public class BlockingCollectionTaskQueue : IBackgroundTaskQueue
 {
     private readonly BlockingCollection<Func<CancellationToken, ValueTask>> _queue;
 
-    public BackgroundTaskQueueSimple2(int capacity)
+    public BlockingCollectionTaskQueue(int capacity)
     {
-        // �L���[�̍ő�e�ʂ�ݒ�
+        // キューの最大容量を設定
         _queue = new BlockingCollection<Func<CancellationToken, ValueTask>>(
             new ConcurrentQueue<Func<CancellationToken, ValueTask>>(), capacity);
     }
@@ -117,7 +137,7 @@ public class BackgroundTaskQueueSimple2 : IBackgroundTaskQueue
 
         try
         {
-            _queue.Add(workItem); // �L���[�Ƀ^�X�N��ǉ�
+            _queue.Add(workItem); // キューにタスクを追加
         }
         catch (InvalidOperationException)
         {
@@ -131,18 +151,18 @@ public class BackgroundTaskQueueSimple2 : IBackgroundTaskQueue
     {
         try
         {
-            var workItem = _queue.Take(cancellationToken); // �L���[����^�X�N���擾�i��Ȃ�ҋ@�j
+            var workItem = _queue.Take(cancellationToken); // キューからタスクを取得（空なら待機）
             return new ValueTask<Func<CancellationToken, ValueTask>>(workItem);
         }
         catch (OperationCanceledException)
         {
-            return new ValueTask<Func<CancellationToken, ValueTask>>();
+            return new ValueTask<Func<CancellationToken, ValueTask>>(ct => new ValueTask());
         }
     }
 
     public void Dispose()
     {
-        _queue.CompleteAdding(); // �L���[�̒ǉ����I��
+        _queue.CompleteAdding(); // キューの追加を終了
         _queue.Dispose();
     }
 }
