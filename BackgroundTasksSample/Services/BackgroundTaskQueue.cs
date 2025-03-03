@@ -30,6 +30,9 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
             FullMode = BoundedChannelFullMode.Wait // キューが満杯なら待機
         };
         _queue = Channel.CreateBounded<Func<CancellationToken, ValueTask>>(options);
+
+        //// 無制限のキューを作成
+        //_queue = Channel.CreateUnbounded<Func<CancellationToken, ValueTask>>();
     }
 
     public async ValueTask QueueBackgroundWorkItemAsync(
